@@ -1,55 +1,66 @@
 jQuery(document).ready(function($) {
-    let startPlace, endPlace;
-
-    const startInput = document.getElementById('start-location');
-    const endInput = document.getElementById('end-location');
-
-    const autocompleteStart = new google.maps.places.Autocomplete(startInput);
-    const autocompleteEnd = new google.maps.places.Autocomplete(endInput);
-
-    autocompleteStart.addListener('place_changed', function() {
-        startPlace = autocompleteStart.getPlace();
+    flatpickr("#booking-date", {
+        altInput: true,
+        altFormat: "F j, Y",
+        dateFormat: "Y-m-d"
     });
 
-    autocompleteEnd.addListener('place_changed', function() {
-        endPlace = autocompleteEnd.getPlace();
-    });
+    $('#calculate-price').on('click', function() {
+        var date = $('#booking-date').val();
+        var start = $('#start-location').val();
+        var end = $('#end-location').val();
 
-    $('#calculate-price').on('click', function(e) {
-        e.preventDefault();
-        const date = $('#booking-date').val();
-        if (!startPlace || !endPlace || !date) {
-            alert('Fill all fields.');
+        if (!date || !start || !end) {
+            alert('Please fill all fields.');
             return;
         }
 
         $.post(cbs_ajax.ajax_url, {
             action: 'cbs_calculate_price',
-            start_lat: startPlace.geometry.location.lat(),
-            start_lng: startPlace.geometry.location.lng(),
-            end_lat: endPlace.geometry.location.lat(),
-            end_lng: endPlace.geometry.location.lng(),
-            booking_date: date
-        }, function(res) {
-            let result = JSON.parse(res);
-            $('#quote-output').html('<strong>Price: $' + result.price + '</strong>');
-            $('#confirm-booking').show().data('price', result.price);
+            booking_date: date,
+            start_location: start,
+            end_location: end
+        }, function(response) {
+            var data = JSON.parse(response);
+            if (data.error) {
+                $('#quote-output').html('<span style="color:red">' + data.error + '</span>');
+            } else {
+                $('#quote-output').html('Total Price:' + data.price +'Taka' + '<br>Total Distance: ' + data.distance + ' km<br>Garage to Start Location Distance: ' + data.garage_to_start + ' km');
+                $('#confirm-booking').show();
+                $('#customer-fields').show();
+                $('#confirm-booking').data('price', data.price);
+                $('#confirm-booking').data('distance', data.distance);
+            }
         });
     });
 
     $('#car-booking-form').on('submit', function(e) {
         e.preventDefault();
+        var date = $('#booking-date').val();
+        var start = $('#start-location').val();
+        var end = $('#end-location').val();
+        var price = $('#confirm-booking').data('price');
+        var distance = $('#confirm-booking').data('distance');
+        var name = $('#cbs-name').val();
+        var phone = $('#cbs-phone').val();
+        var email = $('#cbs-email').val();
+
         $.post(cbs_ajax.ajax_url, {
             action: 'cbs_save_booking',
-            booking_date: $('#booking-date').val(),
-            start_location: $('#start-location').val(),
-            end_location: $('#end-location').val(),
-            price: $('#confirm-booking').data('price')
-        }, function(res) {
-            let result = JSON.parse(res);
-            if (result.success) {
-                alert('Booking saved!');
-                location.reload();
+            booking_date: date,
+            start_location: start,
+            end_location: end,
+            price: price,
+            distance: distance,
+            name: name,
+            phone: phone,
+            email: email
+        }, function(response) {
+            var data = JSON.parse(response);
+            if (data.success) {
+                $('#quote-output').html('<span style="color:green">Booking confirmed!</span>');
+                $('#confirm-booking').hide();
+                $('#customer-fields').hide();
             }
         });
     });
