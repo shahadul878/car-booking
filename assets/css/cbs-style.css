@@ -1,0 +1,48 @@
+.cbs-booking-wrapper {
+    max-width: 500px;
+    margin: 40px auto;
+    background: #f8f9fa;
+    padding: 30px;
+    border-radius: 12px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+    font-family: Arial, sans-serif;
+}
+
+.cbs-booking-wrapper label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
+.cbs-booking-wrapper input[type="text"],
+.cbs-booking-wrapper input[type="date"] {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 20px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    font-size: 15px;
+}
+
+.cbs-button {
+    display: inline-block;
+    background: #28a745;
+    color: #fff;
+    padding: 12px 20px;
+    font-size: 16px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.3s ease;
+}
+
+.cbs-button:hover {
+    background: #218838;
+}
+
+.cbs-quote-output {
+    margin-top: 20px;
+    font-size: 18px;
+    font-weight: bold;
+    color: #333;
+}
