@@ -1,11 +1,44 @@
 jQuery(document).ready(function($) {
-    flatpickr("#booking-date", {
-        altInput: true,
-        altFormat: "F j, Y",
-        dateFormat: "Y-m-d"
+
+    const maxSlotsPerDay = 2;
+    let bookingCounts = {};
+
+    function formatDateLocal(dateObj) {
+        const y = dateObj.getFullYear();
+        const m = (dateObj.getMonth() + 1).toString().padStart(2, '0');
+        const d = dateObj.getDate().toString().padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+
+    $.post(cbs_ajax.ajax_url, { action: 'cbs_get_booking_counts' }, function (response) {
+        try {
+            bookingCounts = JSON.parse(response);
+        } catch (e) {
+            console.error("Error parsing booking counts", e);
+        }
+
+        flatpickr("#booking-date", {
+            dateFormat: "Y-m-d",
+            minDate: "today",
+            onDayCreate: function (dObj, dStr, fp, dayElem) {
+                const date = formatDateLocal(dayElem.dateObj);
+                const booked = bookingCounts[date] || 0;
+                const slotsLeft = maxSlotsPerDay - booked;
+
+                console.log({date: date, booked: booked, slotsLeft: slotsLeft, dayElem: dayElem});
+
+                if (booked >= maxSlotsPerDay) {
+                    dayElem.classList.add("fully-booked");
+                    dayElem.classList.add("flatpickr-disabled");
+                    dayElem.setAttribute("title", "Fully booked");
+                } else if (booked >= 0) {
+                    dayElem.setAttribute("title", `${booked} of ${maxSlotsPerDay} slots booked`);
+                }
+            }
+        });
     });
 
-    $('#calculate-price').on('click', function() {
+    $('#calculate-price').on('click', function()  {
         var date = $('#booking-date').val();
         var start = $('#start-location').val();
         var end = $('#end-location').val();
@@ -22,10 +55,11 @@ jQuery(document).ready(function($) {
             end_location: end
         }, function(response) {
             var data = JSON.parse(response);
+
             if (data.error) {
                 $('#quote-output').html('<span style="color:red">' + data.error + '</span>');
             } else {
-                $('#quote-output').html('Total Price:' + data.price +'Taka' + '<br>Total Distance: ' + data.distance + ' km<br>Garage to Start Location Distance: ' + data.garage_to_start + ' km');
+                $('#quote-output').html('Total Price:' + data.price +'Taka' + '<br>Distance Between: ' + data.dist_between + ' km<br>Garage to Start Location Distance: ' + data.garage_to_start + ' km<br>Total Distance: ' + data.distance + ' km');
                 $('#confirm-booking').show();
                 $('#customer-fields').show();
                 $('#confirm-booking').data('price', data.price);

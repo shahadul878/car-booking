@@ -11,10 +11,11 @@
     flex-direction: column;
 }
 .cbs-booking-wrapper label {
-    margin-top: 10px;
-    font-weight: 600;
+    display: block;
+    margin-top: 15px;
+    font-weight: bold;
 }
-.cbs-booking-wrapper select,
+.cbs-booking-wrapper select,.cbs-booking-wrapper input,
 .cbs-booking-wrapper input[type="date"] {
     padding: 10px;
     border: 1px solid #ccc;
@@ -39,4 +40,10 @@
     margin-top: 15px;
     font-weight: bold;
     color: #333;
+}
+
+.flatpickr-day.fully-booked {
+    background: #e74c3c !important;
+    color: white !important;
+    cursor: not-allowed;
 }
