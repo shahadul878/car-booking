@@ -25,8 +25,6 @@ jQuery(document).ready(function($) {
                 const booked = bookingCounts[date] || 0;
                 const slotsLeft = maxSlotsPerDay - booked;
 
-                console.log({date: date, booked: booked, slotsLeft: slotsLeft, dayElem: dayElem});
-
                 if (booked >= maxSlotsPerDay) {
                     dayElem.classList.add("fully-booked");
                     dayElem.classList.add("flatpickr-disabled");
@@ -59,12 +57,20 @@ jQuery(document).ready(function($) {
             if (data.error) {
                 $('#quote-output').html('<span style="color:red">' + data.error + '</span>');
             } else {
-                $('#quote-output').html('Total Price:' + data.price +'Taka' + '<br>Distance Between: ' + data.dist_between + ' km<br>Garage to Start Location Distance: ' + data.garage_to_start + ' km<br>Total Distance: ' + data.distance + ' km');
+                $('#quote-output').html(
+                    'Garage → Pickup: ' + data.garage_to_start + ' km (' + data.garage_to_start_charge + ' BDT)' +
+                    '<br>Pickup → Drop-off: ' + data.dist_between + ' km (' + data.pickup_to_drop_charge + ' BDT)' +
+                    '<br>Total Distance: ' + data.distance + ' km' +
+                    (data.surcharge_urgent ? '<br><strong>Urgent Booking Charge Applied (' + data.urgent_charge + '%)</strong>' : '') +
+                    (data.surcharge_weekend ? '<br><strong>Weekend Charge Applied (' + data.weekend_charge + '%)</strong>' : '') +
+                    '<br><strong>Total Price: ' + data.final_price + ' BDT</strong>'
+                );
                 $('#confirm-booking').show();
                 $('#customer-fields').show();
-                $('#confirm-booking').data('price', data.price);
+                $('#confirm-booking').data('price', data.final_price);
                 $('#confirm-booking').data('distance', data.distance);
             }
+
         });
     });
 
@@ -98,4 +104,40 @@ jQuery(document).ready(function($) {
             }
         });
     });
+
+    // --- Address Autocomplete ---
+    function setupAutocomplete(inputId) {
+        var $input = $('#' + inputId);
+        var $dropdown = $('<div class="cbs-autocomplete-dropdown"></div>').css({position:'absolute',zIndex:9999,background:'#fff',border:'1px solid #ccc',display:'none',maxHeight:'200px',overflowY:'auto'});
+        $input.after($dropdown);
+        $input.on('input', function() {
+            var val = $input.val();
+            if (val.length < 3) { $dropdown.hide(); return; }
+            $.get(cbs_ajax.ajax_url, {
+                action: 'cbs_places_autocomplete',
+                q: val
+            }, function(data) {
+                $dropdown.empty();
+                if (Array.isArray(data) && data.length) {
+                    data.forEach(function(place) {
+                        var $item = $('<div class="cbs-autocomplete-item"></div>').text(place).css({padding:'5px',cursor:'pointer'});
+                        $item.on('mousedown', function(e) {
+                            e.preventDefault();
+                            $input.val(place);
+                            $dropdown.hide();
+                        });
+                        $dropdown.append($item);
+                    });
+                    var offset = $input.offset();
+                    $dropdown.css({top: $input.outerHeight(), left: 0, width: $input.outerWidth()});
+                    $dropdown.show();
+                } else {
+                    $dropdown.hide();
+                }
+            });
+        });
+        $input.on('blur', function() { setTimeout(function() { $dropdown.hide(); }, 200); });
+    }
+    setupAutocomplete('start-location');
+    setupAutocomplete('end-location');
 });

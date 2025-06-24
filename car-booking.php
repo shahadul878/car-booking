@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Car Booking System
  * Description: Car rental quote and booking plugin with distance-based pricing, weekend and urgent booking charges.
- * Version: 1.1
+ * Version: 1.2
  * Author: Shahadul Islam
  */
 
@@ -13,10 +13,20 @@ if ( ! defined( 'ABSPATH' ) ) {
 class CarBookingSystem {
 
 	private $table_name;
-	private $garage_lat = 23.7745;
-	private $garage_lng = 90.3654;
-
+	private $garage_address_option = 'cbs_garage_address';
+	private $garage_lat_option = 'cbs_garage_lat';
+	private $garage_lng_option = 'cbs_garage_lng';
+	private $location_type_option = 'cbs_location_type';
+	private $gomaps_api_key_option = 'cbs_gomaps_api_key';
 	private $locations_option_key = 'cbs_locations';
+	private $booking_limit_per_day = 'cbs_max_bookings_per_day';
+	private $garage_to_pickup_rate_option = 'cbs_rate_garage_to_pickup'; // 10 BDT/km
+	private $pickup_to_drop_rate_option = 'cbs_rate_pickup_to_drop';     // 15 BDT/km
+	private $urgent_surcharge_option = 'cbs_urgent_surcharge';           // 20 (%)
+	private $weekend_surcharge_option = 'cbs_weekend_surcharge';         // 5 (%)
+	private $minimum_price_option = 'cbs_minimum_price';                 // 85 BDT
+	private $CBS_VERSION = '1.2';
+
 
 	public function __construct() {
 		global $wpdb;
@@ -24,9 +34,9 @@ class CarBookingSystem {
 
 		register_activation_hook( __FILE__, [ $this, 'create_booking_table' ] );
 		add_action( 'admin_menu', [ $this, 'register_admin_menu' ] );
+		add_action( 'admin_init', [ $this, 'register_settings' ] );
 		add_shortcode( 'car_booking_form', [ $this, 'render_booking_form' ] );
 		add_action( 'wp_enqueue_scripts', [ $this, 'enqueue_scripts' ] );
-
 		add_action( 'wp_ajax_cbs_calculate_price', [ $this, 'calculate_price' ] );
 		add_action( 'wp_ajax_nopriv_cbs_calculate_price', [ $this, 'calculate_price' ] );
 		add_action( 'wp_ajax_cbs_save_booking', [ $this, 'save_booking' ] );
@@ -35,6 +45,9 @@ class CarBookingSystem {
 		add_action( 'wp_ajax_nopriv_cbs_get_booked_dates', [ $this, 'get_fully_booked_dates' ] );
 		add_action( 'wp_ajax_cbs_get_booking_counts', [ $this, 'get_booking_counts' ] );
 		add_action( 'wp_ajax_nopriv_cbs_get_booking_counts', [ $this, 'get_booking_counts' ] );
+		add_action( 'wp_ajax_cbs_places_autocomplete', [ $this, 'ajax_places_autocomplete' ] );
+		add_action( 'wp_ajax_nopriv_cbs_places_autocomplete', [ $this, 'ajax_places_autocomplete' ] );
+		add_action( 'admin_init', [ $this, 'handle_delete_booking' ] );
 	}
 
 	private function get_locations() {
@@ -67,21 +80,25 @@ class CarBookingSystem {
 
 		require_once( ABSPATH . 'wp-admin/includes/upgrade.php' );
 		dbDelta( $sql );
+		if ( get_option( 'cbs_max_bookings_per_day' ) === false ) {
+			update_option( 'cbs_max_bookings_per_day', 2 );
+		}
 	}
 
 	public function enqueue_scripts() {
 		wp_enqueue_script( 'jquery' );
 		wp_enqueue_script( 'flatpickr', 'https://cdn.jsdelivr.net/npm/flatpickr', [], null, true );
-		wp_enqueue_script( 'cbs-script', plugin_dir_url( __FILE__ ) . 'assets/js/cbs-script.js', [ 'jquery' ], null, true );
+		wp_enqueue_script( 'cbs-script', plugin_dir_url( __FILE__ ) . 'assets/js/cbs-script.js', [ 'jquery' ], $this->CBS_VERSION, true );
 		wp_enqueue_style( 'flatpickr-style', 'https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css' );
-		wp_enqueue_style( 'cbs-style', plugin_dir_url( __FILE__ ) . 'assets/css/cbs-style.css' );
+		wp_enqueue_style( 'cbs-style', plugin_dir_url( __FILE__ ) . 'assets/css/cbs-style.css',[],$this->CBS_VERSION, 'all' );
 		wp_localize_script( 'cbs-script', 'cbs_ajax', [
 			'ajax_url' => admin_url( 'admin-ajax.php' )
 		] );
 	}
 
 	public function render_booking_form() {
-		$locations = $this->get_locations();
+		$locations     = $this->get_locations();
+		$location_type = get_option( $this->location_type_option, 'manual' );
 		ob_start(); ?>
         <div class="cbs-booking-wrapper">
             <h2>Car Booking System</h2>
@@ -90,21 +107,31 @@ class CarBookingSystem {
                 <input type="text" id="booking-date" name="booking_date" class="cbs-input" placeholder="YYYY-MM-DD"
                        required>
 
-                <label for="start-location">Start Location:</label>
-                <select id="start-location" name="start_location" class="cbs-select" required>
-                    <option value="">-- Select Start Location --</option>
-					<?php foreach ( $locations as $loc => $coords ): ?>
-                        <option value="<?php echo esc_attr( $loc ); ?>"><?php echo esc_html( $loc ); ?></option>
-					<?php endforeach; ?>
-                </select>
+				<?php if ( $location_type === 'google' ) : ?>
+                    <label for="start-location">Start Location:</label>
+                    <input type="text" id="start-location" name="start_location" class="cbs-input"
+                           placeholder="Enter start address" autocomplete="off" required>
 
-                <label for="end-location">End Location:</label>
-                <select id="end-location" name="end_location" class="cbs-select" required>
-                    <option value="">-- Select End Location --</option>
-					<?php foreach ( $locations as $loc => $coords ): ?>
-                        <option value="<?php echo esc_attr( $loc ); ?>"><?php echo esc_html( $loc ); ?></option>
-					<?php endforeach; ?>
-                </select>
+                    <label for="end-location">End Location:</label>
+                    <input type="text" id="end-location" name="end_location" class="cbs-input"
+                           placeholder="Enter end address" autocomplete="off" required>
+				<?php else : ?>
+                    <label for="start-location">Start Location:</label>
+                    <select id="start-location" name="start_location" class="cbs-select" required>
+                        <option value="">-- Select Start Location --</option>
+						<?php foreach ( $locations as $loc => $coords ): ?>
+                            <option value="<?php echo esc_attr( $loc ); ?>"><?php echo esc_html( $loc ); ?></option>
+						<?php endforeach; ?>
+                    </select>
+
+                    <label for="end-location">End Location:</label>
+                    <select id="end-location" name="end_location" class="cbs-select" required>
+                        <option value="">-- Select End Location --</option>
+						<?php foreach ( $locations as $loc => $coords ): ?>
+                            <option value="<?php echo esc_attr( $loc ); ?>"><?php echo esc_html( $loc ); ?></option>
+						<?php endforeach; ?>
+                    </select>
+				<?php endif; ?>
 
                 <button type="button" id="calculate-price" class="cbs-button">Calculate Price</button>
                 <div id="quote-output" class="cbs-quote-output"></div>
@@ -127,44 +154,101 @@ class CarBookingSystem {
 	}
 
 	public function calculate_price() {
-		$locations    = $this->get_locations();
-		$start        = sanitize_text_field( $_POST['start_location'] );
-		$end          = sanitize_text_field( $_POST['end_location'] );
-		$booking_date = sanitize_text_field( $_POST['booking_date'] );
+		$locations       = $this->get_locations();
+		$start           = sanitize_text_field( $_POST['start_location'] );
+		$end             = sanitize_text_field( $_POST['end_location'] );
+		$booking_date    = sanitize_text_field( $_POST['booking_date'] );
+		$date            = new DateTime( $booking_date );
+		$now             = new DateTime();
+		$urgent          = false;
+		$weekend         = false;
+		$location_type   = get_option( $this->location_type_option, 'manual' );
+		$garage_address  = get_option( $this->garage_address_option, 'Adabor Thana Bus stand' );
+		$garage_lat      = get_option( $this->garage_lat_option, '23.7745' );
+		$garage_lng      = get_option( $this->garage_lng_option, '90.3654' );
+		$garage_to_rate  = floatval( get_option( $this->garage_to_pickup_rate_option, 10 ) );
+		$pickup_to_rate  = floatval( get_option( $this->pickup_to_drop_rate_option, 15 ) );
+		$urgent_percent  = floatval( get_option( $this->urgent_surcharge_option, 20 ) );
+		$weekend_percent = floatval( get_option( $this->weekend_surcharge_option, 5 ) );
+		$min_price       = floatval( get_option( $this->minimum_price_option, 85 ) );
 
-		if ( ! isset( $locations[ $start ] ) || ! isset( $locations[ $end ] ) ) {
-			echo json_encode( [ 'error' => 'Invalid location' ] );
-			wp_die();
+		if ( $location_type === 'google' ) {
+			$garage    = $garage_address;
+			$distance1 = $this->get_distance_gomapspro( $garage, $start );
+			$distance2 = $this->get_distance_gomapspro( $start, $end );
+			if ( $distance1 === false || $distance2 === false ) {
+				echo json_encode( [ 'error' => 'Could not get distance from gomaps.pro API.' ] );
+				wp_die();
+			}
+			$dist_to_start = $distance1;
+			$dist_between  = $distance2;
+		} else {
+			if ( ! isset( $locations[ $start ] ) || ! isset( $locations[ $end ] ) ) {
+				echo json_encode( [ 'error' => 'Invalid location' ] );
+				wp_die();
+			}
+			$start_coords  = $locations[ $start ];
+			$end_coords    = $locations[ $end ];
+			$dist_to_start = $this->haversine( $garage_lat, $garage_lng, $start_coords['lat'], $start_coords['lng'] );
+			$dist_between  = $this->haversine( $start_coords['lat'], $start_coords['lng'], $end_coords['lat'], $end_coords['lng'] );
 		}
 
-		$start_coords = $locations[ $start ];
-		$end_coords   = $locations[ $end ];
+		$garage_to_start_charge = $dist_to_start * $garage_to_rate;
+		$pickup_to_drop_charge  = $dist_between * $pickup_to_rate;
 
-		$dist_to_start  = $this->haversine( $this->garage_lat, $this->garage_lng, $start_coords['lat'], $start_coords['lng'] );
-		$dist_between   = $this->haversine( $start_coords['lat'], $start_coords['lng'], $end_coords['lat'], $end_coords['lng'] );
-		$total_distance = $dist_to_start + $dist_between;
-
-		$price = ( $dist_to_start * 10 ) + ( $dist_between * 15 );
-		$price = max( 85, $price );
-
-		$date = new DateTime( $booking_date );
-		$now  = new DateTime();
+		$base_price    = $garage_to_start_charge + $pickup_to_drop_charge;
+		$original_base = $base_price;
 
 		if ( ( $date->getTimestamp() - $now->getTimestamp() ) < 86400 ) {
-			$price *= 1.2;
+			$base_price *= ( 1 + $urgent_percent / 100 );
+			$urgent     = true;
 		}
 
 		if ( in_array( $date->format( 'N' ), [ 6, 7 ] ) ) {
-			$price *= 1.05;
+			$base_price *= ( 1 + $weekend_percent / 100 );
+			$weekend    = true;
+		}
+
+		if ( $base_price < $min_price ) {
+			$base_price = $min_price;
 		}
 
 		echo json_encode( [
-			'price'           => round( $price, 2 ),
-			'dist_between'    => round( $dist_between, 2 ),
-			'distance'        => round( $total_distance, 2 ),
-			'garage_to_start' => round( $dist_to_start, 2 )
+			'garage_to_start'        => round( $dist_to_start, 2 ),
+			'dist_between'           => round( $dist_between, 2 ),
+			'distance'               => round( $dist_to_start + $dist_between, 2 ),
+			'garage_to_start_charge' => round( $garage_to_start_charge, 2 ),
+			'pickup_to_drop_charge'  => round( $pickup_to_drop_charge, 2 ),
+			'surcharge_urgent'       => $urgent,
+			'surcharge_weekend'      => $weekend,
+			'weekend_charge'         => $weekend_percent,
+			'urgent_charge'          => $urgent_percent,
+			'price_before_minimum'   => round( $base_price, 2 ),
+			'final_price'            => round( $base_price, 2 )
 		] );
 		wp_die();
+	}
+
+	// Helper: gomaps.pro API
+	private function get_distance_gomapspro( $origin, $destination ) {
+		$origin      = urlencode( $origin );
+		$destination = urlencode( $destination );
+		$api_key     = get_option( $this->gomaps_api_key_option, '' );
+		if ( $api_key ) {
+			$url      = "https://maps.gomaps.pro/maps/api/distancematrix/json?destinations={$origin}&origins={$destination}&key={$api_key}";
+			$response = wp_remote_get( $url );
+			if ( is_wp_error( $response ) ) {
+				return false;
+			}
+			$body = wp_remote_retrieve_body( $response );
+			$data = json_decode( $body, true );
+			if ( ! isset( $data['rows'][0]['elements'][0]['distance']['value'] ) || ! is_numeric( $data['rows'][0]['elements'][0]['distance']['value'] ) ) {
+				return false;
+			}
+
+			// Convert meters to kilometers
+			return floatval( $data['rows'][0]['elements'][0]['distance']['value'] ) / 1000;
+		}
 	}
 
 	public function save_booking() {
@@ -177,11 +261,11 @@ class CarBookingSystem {
 			$wpdb->prepare( "SELECT COUNT(*) FROM {$this->table_name} WHERE booking_date = %s", $booking_date )
 		);
 
-
-		if ( $count >= 2 ) {
+		$limit = (int) get_option( 'cbs_max_bookings_per_day', 2 );
+		if ( $count >= $limit ) {
 			echo json_encode( [
 				'success' => false,
-				'message' => 'Maximum 2 bookings allowed per day. Please choose another date.'
+				'message' => "Maximum {$limit} bookings allowed per day. Please choose another date."
 			] );
 			wp_die();
 		}
@@ -244,19 +328,49 @@ class CarBookingSystem {
 			$this,
 			'render_locations_page'
 		] );
+		add_submenu_page( 'cbs-bookings', 'Settings', 'Settings', 'manage_options', 'cbs-settings', [
+			$this,
+			'settings_page'
+		] );
+
+
 	}
 
 	public function render_admin_page() {
 		global $wpdb;
 		$results = $wpdb->get_results( "SELECT * FROM {$this->table_name} ORDER BY created_at DESC" );
-
+		if ( isset( $_GET['deleted'] ) && $_GET['deleted'] == 1 ) {
+			echo '<div class="notice notice-success is-dismissible"><p>Booking deleted successfully.</p></div>';
+		}
 		echo '<div class="wrap"><h1>Car Bookings</h1>';
-		echo '<table class="widefat striped"><thead><tr><th>ID</th><th>Date</th><th>Start</th><th>End</th><th>Distance (km)</th><th>Price</th><th>Name</th><th>Phone</th><th>Email</th><th>Created</th></tr></thead><tbody>';
+		echo '<table class="widefat striped"><thead><tr><th>ID</th><th>Date</th><th>Start</th><th>End</th><th>Distance (km)</th><th>Price</th><th>Name</th><th>Phone</th><th>Email</th><th>Created</th><th>Action</th></tr></thead><tbody>';
 		foreach ( $results as $r ) {
-			echo "<tr><td>{$r->id}</td><td>{$r->booking_date}</td><td>{$r->start_location}</td><td>{$r->end_location}</td><td>{$r->distance}</td><td>{$r->price} ৳ </td><td>{$r->name}</td><td>{$r->phone}</td><td>{$r->email}</td><td>{$r->created_at}</td></tr>";
+			$delete_url = wp_nonce_url(
+				admin_url( 'admin.php?page=cbs-bookings&action=delete_booking&id=' . $r->id ),
+				'cbs_delete_booking_' . $r->id
+			);
+			echo "<tr><td>{$r->id}</td><td>{$r->booking_date}</td><td>{$r->start_location}</td><td>{$r->end_location}</td><td>{$r->distance}</td><td>{$r->price} ৳ </td><td>{$r->name}</td><td>{$r->phone}</td><td>{$r->email}</td><td>{$r->created_at}</td><td><a href='" . esc_url( $delete_url ) . "' class='button button-small' onclick=\"return confirm('Are you sure you want to delete this booking?');\">Delete</a></td></tr>";
 		}
 		echo '</tbody></table></div>';
 	}
+
+	public function handle_delete_booking() {
+		if (
+			is_admin() &&
+			current_user_can( 'manage_options' ) &&
+			isset( $_GET['action'], $_GET['id'] ) &&
+			$_GET['action'] === 'delete_booking'
+		) {
+			$booking_id = intval( $_GET['id'] );
+			if ( wp_verify_nonce( $_GET['_wpnonce'], 'cbs_delete_booking_' . $booking_id ) ) {
+				global $wpdb;
+				$wpdb->delete( $this->table_name, [ 'id' => $booking_id ], [ '%d' ] );
+				wp_safe_redirect( admin_url( 'admin.php?page=cbs-bookings&deleted=1' ) );
+				exit;
+			}
+		}
+	}
+
 
 	public function render_locations_page() {
 		if ( isset( $_POST['cbs_locations'] ) && current_user_can( 'manage_options' ) ) {
@@ -280,6 +394,108 @@ class CarBookingSystem {
 		<?php
 	}
 
+	public function register_settings() {
+		register_setting( 'cbs_settings_group', $this->garage_address_option );
+		register_setting( 'cbs_settings_group', $this->garage_lat_option );
+		register_setting( 'cbs_settings_group', $this->garage_lng_option );
+		register_setting( 'cbs_settings_group', $this->location_type_option );
+		register_setting( 'cbs_settings_group', $this->gomaps_api_key_option );
+		register_setting( 'cbs_settings_group', $this->booking_limit_per_day );
+		register_setting( 'cbs_settings_group', $this->garage_to_pickup_rate_option );
+		register_setting( 'cbs_settings_group', $this->pickup_to_drop_rate_option );
+		register_setting( 'cbs_settings_group', $this->urgent_surcharge_option );
+		register_setting( 'cbs_settings_group', $this->weekend_surcharge_option );
+		register_setting( 'cbs_settings_group', $this->minimum_price_option );
+
+	}
+
+	public function settings_page() {
+		?>
+        <div class="wrap">
+            <h1>Car Booking Settings</h1>
+            <form method="post" action="options.php">
+				<?php settings_fields( 'cbs_settings_group' ); ?>
+                <table class="form-table">
+                    <tr valign="top">
+                        <th scope="row">Location Type</th>
+                        <td>
+                            <label><input type="radio" name="<?php echo esc_attr( $this->location_type_option ); ?>"
+                                          value="manual" <?php checked( get_option( $this->location_type_option, 'manual' ), 'manual' ); ?>>
+                                Manual (Dropdown)</label><br>
+                            <label><input type="radio" name="<?php echo esc_attr( $this->location_type_option ); ?>"
+                                          value="google" <?php checked( get_option( $this->location_type_option ), 'google' ); ?>>
+                                gomaps.pro API</label>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Garage Address</th>
+                        <td><input type="text" name="<?php echo esc_attr( $this->garage_address_option ); ?>"
+                                   value="<?php echo esc_attr( get_option( $this->garage_address_option, 'Adabor Thana Bus stand' ) ); ?>"
+                                   class="regular-text"></td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Garage Latitude</th>
+                        <td><input type="text" name="<?php echo esc_attr( $this->garage_lat_option ); ?>"
+                                   value="<?php echo esc_attr( get_option( $this->garage_lat_option, '23.7745' ) ); ?>"
+                                   class="regular-text"></td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">Garage Longitude</th>
+                        <td><input type="text" name="<?php echo esc_attr( $this->garage_lng_option ); ?>"
+                                   value="<?php echo esc_attr( get_option( $this->garage_lng_option, '90.3654' ) ); ?>"
+                                   class="regular-text"></td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">gomaps.pro API Key (optional)</th>
+                        <td><input type="text" name="<?php echo esc_attr( $this->gomaps_api_key_option ); ?>"
+                                   value="<?php echo esc_attr( get_option( $this->gomaps_api_key_option, '' ) ); ?>"
+                                   class="regular-text">
+                            <p class="description">Leave blank if not required by gomaps.pro.</p></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Max Bookings Per Day</th>
+                        <td><input type="number" name="cbs_max_bookings_per_day"
+                                   value="<?php echo esc_attr( get_option( 'cbs_max_bookings_per_day', 2 ) ); ?>"
+                                   min="1"/></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Garage to Pickup Rate (BDT/km)</th>
+                        <td><input type="number" name="<?php echo esc_attr( $this->garage_to_pickup_rate_option ); ?>"
+                                   value="<?php echo esc_attr( get_option( $this->garage_to_pickup_rate_option, 10 ) ); ?>"
+                                   step="0.01" class="small-text"/></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Pickup to Drop Rate (BDT/km)</th>
+                        <td><input type="number" name="<?php echo esc_attr( $this->pickup_to_drop_rate_option ); ?>"
+                                   value="<?php echo esc_attr( get_option( $this->pickup_to_drop_rate_option, 15 ) ); ?>"
+                                   step="0.01" class="small-text"/></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Urgent Booking Surcharge (%)</th>
+                        <td><input type="number" name="<?php echo esc_attr( $this->urgent_surcharge_option ); ?>"
+                                   value="<?php echo esc_attr( get_option( $this->urgent_surcharge_option, 20 ) ); ?>"
+                                   step="0.01" class="small-text"/></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Weekend Surcharge (%)</th>
+                        <td><input type="number" name="<?php echo esc_attr( $this->weekend_surcharge_option ); ?>"
+                                   value="<?php echo esc_attr( get_option( $this->weekend_surcharge_option, 5 ) ); ?>"
+                                   step="0.01" class="small-text"/></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Minimum Price (BDT)</th>
+                        <td><input type="number" name="<?php echo esc_attr( $this->minimum_price_option ); ?>"
+                                   value="<?php echo esc_attr( get_option( $this->minimum_price_option, 85 ) ); ?>"
+                                   step="1" class="small-text"/></td>
+                    </tr>
+
+                </table>
+				<?php submit_button(); ?>
+            </form>
+        </div>
+		<?php
+	}
+
 	private function haversine( $lat1, $lon1, $lat2, $lon2, $earthRadius = 6371 ) {
 		$lat1     = deg2rad( $lat1 );
 		$lon1     = deg2rad( $lon1 );
@@ -292,6 +508,47 @@ class CarBookingSystem {
 		                         cos( $lat1 ) * cos( $lat2 ) * pow( sin( $lonDelta / 2 ), 2 ) ) );
 
 		return $angle * $earthRadius;
+	}
+
+	// AJAX handler for address autocomplete
+	public function ajax_places_autocomplete() {
+		$q = isset( $_GET['q'] ) ? sanitize_text_field( $_GET['q'] ) : '';
+		if ( strlen( $q ) < 3 ) {
+			wp_send_json( [] );
+		}
+		$api_key = get_option( $this->gomaps_api_key_option, '' );
+		if ( $api_key ) {
+			$url      = 'https://maps.gomaps.pro/maps/api/place/autocomplete/json?input=' . urlencode( $q ) . '&key=' . urlencode( $api_key );
+			$response = wp_remote_get( $url );
+			if ( is_wp_error( $response ) ) {
+				wp_send_json( [] );
+			}
+			$body = wp_remote_retrieve_body( $response );
+			$data = json_decode( $body, true );
+			if ( ! isset( $data['predictions'] ) || ! is_array( $data['predictions'] ) ) {
+				wp_send_json( [] );
+			}
+			$suggestions = array();
+			foreach ( $data['predictions'] as $prediction ) {
+				if ( isset( $prediction['description'] ) ) {
+					$suggestions[] = $prediction['description'];
+				}
+			}
+			wp_send_json( $suggestions );
+		} else {
+			// fallback to old gomaps.pro API
+			$url      = 'https://gomaps.pro/api/places?q=' . urlencode( $q );
+			$response = wp_remote_get( $url );
+			if ( is_wp_error( $response ) ) {
+				wp_send_json( [] );
+			}
+			$body = wp_remote_retrieve_body( $response );
+			$data = json_decode( $body, true );
+			if ( ! is_array( $data ) ) {
+				wp_send_json( [] );
+			}
+			wp_send_json( $data );
+		}
 	}
 }
 

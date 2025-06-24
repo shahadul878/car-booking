@@ -47,3 +47,28 @@
     color: white !important;
     cursor: not-allowed;
 }
+
+/* Address Autocomplete Dropdown Styles */
+.cbs-autocomplete-dropdown {
+  position: absolute;
+  z-index: 9999;
+  background: #fff;
+  border: 1px solid #0073aa;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  display: none;
+  max-height: 220px;
+  overflow-y: auto;
+  margin-top: 2px;
+}
+.cbs-autocomplete-item {
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 15px;
+  color: #222;
+  transition: background 0.15s;
+}
+.cbs-autocomplete-item:hover, .cbs-autocomplete-item.active {
+  background: #f0f6fa;
+  color: #0073aa;
+}
