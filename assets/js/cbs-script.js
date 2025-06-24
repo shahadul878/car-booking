@@ -138,6 +138,9 @@ jQuery(document).ready(function($) {
         });
         $input.on('blur', function() { setTimeout(function() { $dropdown.hide(); }, 200); });
     }
-    setupAutocomplete('start-location');
-    setupAutocomplete('end-location');
+    if(cbs_ajax.locations_type == 'google'){
+        setupAutocomplete('start-location');
+        setupAutocomplete('end-location');
+    }
+
 });

@@ -92,7 +92,8 @@ class CarBookingSystem {
 		wp_enqueue_style( 'flatpickr-style', 'https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css' );
 		wp_enqueue_style( 'cbs-style', plugin_dir_url( __FILE__ ) . 'assets/css/cbs-style.css',[],$this->CBS_VERSION, 'all' );
 		wp_localize_script( 'cbs-script', 'cbs_ajax', [
-			'ajax_url' => admin_url( 'admin-ajax.php' )
+			'ajax_url' => admin_url( 'admin-ajax.php' ),
+            'locations_type' => get_option( $this->location_type_option ),
 		] );
 	}
 
